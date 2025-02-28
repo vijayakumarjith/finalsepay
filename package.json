@@ -1,0 +1,41 @@
+{
+  "name": "instamojo-nodejs",
+  "version": "1.0.0",
+  "description": "Instamojo API Wrapper",
+  "main": "lib/Instamojo.js",
+  "scripts": {
+    "test": "jest --env=node"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sidhantpanda/instamojo-nodejs.git"
+  },
+  "keywords": [
+    "instamojo",
+    "payment",
+    "gateway",
+    "node"
+  ],
+  "authors": [
+    {
+      "name": "Vinayak Sarawagi",
+      "email": "vinayaksarawagi25@gmail.com"
+    }
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/Instamojo/instamojo-nodejs",
+  "devDependencies": {
+    "jest": "^25.1.0"
+  },
+  "dependencies": {
+    "axios": "^0.19.2",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.1.0",
+    "instamojo-nodejs": "file:",
+    "nodemailer": "^6.10.0"
+  },
+  "jest": {
+    "verbose": true
+  }
+}
