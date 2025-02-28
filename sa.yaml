@@ -1,0 +1,4 @@
+- name: Set up Firebase Admin SDK
+  run: echo "$FIREBASE_CREDENTIALS" > firebase-adminsdk.json
+  env:
+    FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
