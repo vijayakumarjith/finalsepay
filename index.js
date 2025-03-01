@@ -1,25 +1,18 @@
 const express = require('express');
 const axios = require('axios');
 const path = require('path');
-const admin = require('firebase-admin');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const { Parser } = require('json2csv'); // Convert JSON to CSV
+
 const app = express();
 const port = 3000;
-
-// Firebase setup
-const serviceAccount = require('./firebase-adminsdk.json');
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://edcrec-1b825-default-rtdb.firebaseio.com'
-});
-const db = admin.firestore();
 
 // Middleware to parse JSON and form data
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files (e.g., CSS, JS)
+// Serve static files
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Instamojo API credentials
@@ -35,6 +28,9 @@ const transporter = nodemailer.createTransport({
         pass: 'tnqu avzx nmit iipm'
     }
 });
+
+// Dummy database (Replace with actual database later)
+let paymentRecords = [];
 
 // Route to serve the HTML form
 app.get('/', (req, res) => {
@@ -66,18 +62,17 @@ app.post('/create-payment', async (req, res) => {
             }
         );
 
-        // Store payment details in Firebase
-        await db.collection('payments').doc(uniqueKey).set({
+        // Store payment details in the dummy database
+        paymentRecords.push({
             teamName,
             email,
             amount,
             payment_url: response.data.payment_request.longurl,
             uniqueKey,
-            status: 'Initiated',
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+            status: 'Initiated'
         });
 
-        // Send email confirmation with better formatting
+        // Send email confirmation
         const emailHtml = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 5px;">
                 <h2 style="color: #4a5568; text-align: center;">Hackathon Registration Payment</h2>
@@ -97,7 +92,6 @@ app.post('/create-payment', async (req, res) => {
             from: 'STARTUPSPARK@RAJALAKSHMI.EDU.IN',
             to: email,
             subject: 'Payment Initiated for Hackathon Registration',
-            text: `Dear ${teamName}, your payment has been initiated. Your unique participation key is: ${uniqueKey}. Complete your payment here: ${response.data.payment_request.longurl}`,
             html: emailHtml
         });
 
@@ -112,13 +106,17 @@ app.post('/create-payment', async (req, res) => {
 app.get('/payment-success', async (req, res) => {
     const paymentId = req.query.payment_id;
     const uniqueKey = req.query.unique_key;
-    
+
     if (!uniqueKey) {
         return res.status(400).send('Invalid payment confirmation: Missing unique key.');
     }
-    
+
     try {
-        // Verify the payment with Instamojo if payment_id exists
+        // Find the payment record
+        const paymentIndex = paymentRecords.findIndex(record => record.uniqueKey === uniqueKey);
+        if (paymentIndex === -1) return res.status(404).send('Payment not found');
+
+        // Verify the payment with Instamojo
         if (paymentId) {
             try {
                 const paymentVerification = await axios.get(
@@ -130,65 +128,30 @@ app.get('/payment-success', async (req, res) => {
                         },
                     }
                 );
-                
+
                 const paymentStatus = paymentVerification.data.payment.status;
-                
-                // Update the payment status in Firebase
-                await db.collection('payments').doc(uniqueKey).update({ 
-                    status: paymentStatus === 'Credit' ? 'Paid' : paymentStatus,
-                    paymentId,
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                });
-                
-                // Get team details for email
-                const paymentDoc = await db.collection('payments').doc(uniqueKey).get();
-                const paymentData = paymentDoc.data();
-                
-                if (paymentData && paymentStatus === 'Credit') {
-                    // Send confirmation email
-                    const confirmationEmailHtml = `
-                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 5px;">
-                            <h2 style="color: #4a5568; text-align: center;">Payment Successful!</h2>
-                            <p>Dear <strong>${paymentData.teamName}</strong>,</p>
-                            <p>Your payment for the Hackathon Registration has been successfully processed.</p>
-                            <p><strong>Payment Details:</strong></p>
-                            <ul>
-                                <li>Amount: ₹${paymentData.amount}</li>
-                                <li>Payment ID: ${paymentId}</li>
-                                <li>Unique Key: ${uniqueKey}</li>
-                            </ul>
-                            <p>You are now officially registered for the hackathon. We look forward to seeing your innovative ideas!</p>
-                            <p>Thank you,<br>The Hackathon Team</p>
-                        </div>
-                    `;
-                    
+
+                // Update payment status
+                paymentRecords[paymentIndex].status = paymentStatus === 'Credit' ? 'Paid' : paymentStatus;
+                paymentRecords[paymentIndex].paymentId = paymentId;
+
+                // Send confirmation email
+                if (paymentStatus === 'Credit') {
                     await transporter.sendMail({
                         from: 'STARTUPSPARK@RAJALAKSHMI.EDU.IN',
-                        to: paymentData.email,
+                        to: paymentRecords[paymentIndex].email,
                         subject: 'Payment Successful - Hackathon Registration Confirmed',
-                        text: `Dear ${paymentData.teamName}, your payment of ₹${paymentData.amount} has been successfully processed. Your Payment ID is: ${paymentId} and Unique Key is: ${uniqueKey}. You are now officially registered for the hackathon.`,
-                        html: confirmationEmailHtml
+                        text: `Dear ${paymentRecords[paymentIndex].teamName}, your payment has been successfully processed. Your Payment ID is: ${paymentId} and Unique Key is: ${uniqueKey}.`,
                     });
                 }
-                
-                // Redirect to success page with status
+
                 return res.redirect(`/?status=success&payment_id=${paymentId}`);
             } catch (error) {
                 console.error('Error verifying payment:', error);
-                await db.collection('payments').doc(uniqueKey).update({ 
-                    status: 'Verification Failed',
-                    paymentId,
-                    error: error.message,
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                });
                 return res.redirect('/?status=error&message=payment_verification_failed');
             }
         } else {
-            // If no payment_id, update as pending
-            await db.collection('payments').doc(uniqueKey).update({ 
-                status: 'Pending',
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
+            paymentRecords[paymentIndex].status = 'Pending';
             return res.redirect('/?status=pending');
         }
     } catch (error) {
@@ -198,20 +161,30 @@ app.get('/payment-success', async (req, res) => {
 });
 
 // API endpoint to check payment status
-app.get('/api/payment-status/:uniqueKey', async (req, res) => {
+app.get('/api/payment-status/:uniqueKey', (req, res) => {
+    const uniqueKey = req.params.uniqueKey;
+    const payment = paymentRecords.find(record => record.uniqueKey === uniqueKey);
+
+    if (!payment) {
+        return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    res.json({ success: true, status: payment.status, paymentId: payment.paymentId });
+});
+
+// Route to generate and download CSV
+app.get('/Tonyiwill-meetyou', (req, res) => {
     try {
-        const uniqueKey = req.params.uniqueKey;
-        const doc = await db.collection('payments').doc(uniqueKey).get();
-        
-        if (!doc.exists) {
-            return res.status(404).json({ success: false, message: 'Payment not found' });
-        }
-        
-        const data = doc.data();
-        return res.json({ success: true, status: data.status, paymentId: data.paymentId });
+        const fields = ['teamName', 'email', 'amount', 'status', 'paymentId'];
+        const json2csvParser = new Parser({ fields });
+        const csv = json2csvParser.parse(paymentRecords);
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=payments.csv');
+        res.send(csv);
     } catch (error) {
-        console.error('Error checking payment status:', error);
-        return res.status(500).json({ success: false, message: 'Failed to check payment status' });
+        console.error('Error generating CSV:', error);
+        res.status(500).send('Error generating CSV file');
     }
 });
 
